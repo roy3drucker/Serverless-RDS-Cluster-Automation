@@ -17,9 +17,9 @@ jobs:
             cd sam
             sam build
             if [ -n "$GITHUB_TOKEN" ]; then
-              sam deploy --no-confirm-changeset --parameter-overrides GitHubToken=$GITHUB_TOKEN
+              sam deploy --stack-name serverless-rds-automation --no-confirm-changeset --parameter-overrides GitHubToken=$GITHUB_TOKEN
             else
-              sam deploy --no-confirm-changeset
+              sam deploy --stack-name serverless-rds-automation --no-confirm-changeset
             fi
 
   deploy-terraform:
