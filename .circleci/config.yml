@@ -16,7 +16,11 @@ jobs:
             pip install aws-sam-cli
             cd sam
             sam build
-            sam deploy --no-confirm-changeset --parameter-overrides GitHubToken=$GITHUB_TOKEN
+            if [ -n "$GITHUB_TOKEN" ]; then
+              sam deploy --no-confirm-changeset --parameter-overrides GitHubToken=$GITHUB_TOKEN
+            else
+              sam deploy --no-confirm-changeset
+            fi
 
   deploy-terraform:
     docker:
