@@ -39,7 +39,7 @@ Resources:
     Properties:
       CodeUri: lambda/
       Handler: handler.lambda_handler
-      Runtime: python3.13
+      Runtime: python3.11
       Timeout: 30
       Environment:
         Variables:
