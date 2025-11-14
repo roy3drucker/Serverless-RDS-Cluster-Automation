@@ -78,14 +78,4 @@ workflows:
           filters:
             branches:
               only: main
-  
-  # Auto-cleanup after 2 hours
-  cleanup:
-    triggers:
-      - schedule:
-          cron: "0 */2 * * *"  # Every 2 hours
-          filters:
-            branches:
-              only: main
-    jobs:
-      - cleanup-resources
+
