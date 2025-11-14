@@ -39,6 +39,32 @@ jobs:
               terraform apply -auto-approve
             fi
 
+  cleanup-resources:
+    docker:
+      - image: cimg/base:stable
+    steps:
+      - checkout
+      - aws-cli/setup
+      - run:
+          name: Install Terraform
+          command: |
+            wget https://releases.hashicorp.com/terraform/1.6.0/terraform_1.6.0_linux_amd64.zip
+            unzip terraform_1.6.0_linux_amd64.zip
+            sudo mv terraform /usr/local/bin/
+      - run:
+          name: Cleanup Terraform Resources
+          command: |
+            if [ -d "terraform-instances" ] && [ "$(ls -A terraform-instances/*.tf 2>/dev/null)" ]; then
+              cd terraform-instances
+              terraform init
+              terraform destroy -auto-approve
+            fi
+      - run:
+          name: Cleanup SAM Resources
+          command: |
+            pip install aws-sam-cli
+            sam delete --stack-name serverless-rds-automation --no-prompts || true
+
 workflows:
   deploy:
     jobs:
@@ -52,3 +78,14 @@ workflows:
           filters:
             branches:
               only: main
+  
+  # Auto-cleanup after 2 hours
+  cleanup:
+    triggers:
+      - schedule:
+          cron: "0 */2 * * *"  # Every 2 hours
+          filters:
+            branches:
+              only: main
+    jobs:
+      - cleanup-resources

@@ -13,7 +13,7 @@ Resources:
   Queue:
     Type: AWS::SQS::Queue
     Properties:
-      VisibilityTimeoutSeconds: 60
+      VisibilityTimeout: 60
 
   Subscription:
     Type: AWS::SNS::Subscription
@@ -39,7 +39,7 @@ Resources:
     Properties:
       CodeUri: lambda/
       Handler: handler.lambda_handler
-      Runtime: python3.11
+      Runtime: python3.13
       Timeout: 30
       Environment:
         Variables:
@@ -57,11 +57,15 @@ Resources:
     Type: AWS::Serverless::Api
     Properties:
       StageName: prod
+      Auth:
+        ApiKeyRequired: true
       DefinitionBody:
         openapi: 3.0.1
         paths:
           /request-rds:
             post:
+              security:
+                - api_key: []
               x-amazon-apigateway-integration:
                 type: aws
                 httpMethod: POST
@@ -72,6 +76,35 @@ Resources:
                 responses:
                   default:
                     statusCode: 200
+        securityDefinitions:
+          api_key:
+            type: apiKey
+            name: x-api-key
+            in: header
+
+  ApiKey:
+    Type: AWS::ApiGateway::ApiKey
+    Properties:
+      Name: !Sub "${AWS::StackName}-api-key"
+      Enabled: true
+
+  UsagePlan:
+    Type: AWS::ApiGateway::UsagePlan #לא חובה אבל best practice
+    Properties:
+      UsagePlanName: !Sub "${AWS::StackName}-usage-plan"
+      ApiStages:
+        - ApiId: !Ref Api
+          Stage: prod
+      Throttle:
+        RateLimit: 100
+        BurstLimit: 200
+
+  UsagePlanKey:
+    Type: AWS::ApiGateway::UsagePlanKey #לא חובה אבל best practice
+    Properties:
+      KeyId: !Ref ApiKey
+      KeyType: API_KEY
+      UsagePlanId: !Ref UsagePlan
 
   ApiRole:
     Type: AWS::IAM::Role
@@ -93,3 +126,6 @@ Resources:
 Outputs:
   ApiUrl:
     Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/prod/request-rds"
+  ApiKey:
+    Value: !Ref ApiKey
+    Description: "API Key for authentication"

@@ -1,5 +1,5 @@
 {
-  "database_name": "myapp",
+  "database_name": "rds",
   "engine": "mysql",
   "environment": "dev"
 }
