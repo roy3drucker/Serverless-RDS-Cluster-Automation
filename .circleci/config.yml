@@ -1,0 +1,54 @@
+version: 2.1
+
+orbs:
+  aws-cli: circleci/aws-cli@4.1.3
+
+jobs:
+  deploy-sam:
+    docker:
+      - image: cimg/python:3.11
+    steps:
+      - checkout
+      - aws-cli/setup
+      - run:
+          name: Deploy SAM
+          command: |
+            pip install aws-sam-cli
+            cd sam
+            sam build
+            sam deploy --no-confirm-changeset --parameter-overrides GitHubToken=$GITHUB_TOKEN
+
+  deploy-terraform:
+    docker:
+      - image: cimg/base:stable
+    steps:
+      - checkout
+      - aws-cli/setup
+      - run:
+          name: Install Terraform
+          command: |
+            wget https://releases.hashicorp.com/terraform/1.6.0/terraform_1.6.0_linux_amd64.zip
+            unzip terraform_1.6.0_linux_amd64.zip
+            sudo mv terraform /usr/local/bin/
+      - run:
+          name: Deploy Terraform
+          command: |
+            if [ -d "terraform-instances" ] && [ "$(ls -A terraform-instances/*.tf 2>/dev/null)" ]; then
+              cd terraform-instances
+              terraform init
+              terraform apply -auto-approve
+            fi
+
+workflows:
+  deploy:
+    jobs:
+      - deploy-sam:
+          filters:
+            branches:
+              only: main
+      - deploy-terraform:
+          requires:
+            - deploy-sam
+          filters:
+            branches:
+              only: main

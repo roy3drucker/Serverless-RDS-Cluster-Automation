@@ -1,0 +1,95 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Parameters:
+  GitHubToken:
+    Type: String
+    NoEcho: true
+
+Resources:
+  Topic:
+    Type: AWS::SNS::Topic
+
+  Queue:
+    Type: AWS::SQS::Queue
+    Properties:
+      VisibilityTimeoutSeconds: 60
+
+  Subscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Protocol: sqs
+      TopicArn: !Ref Topic
+      Endpoint: !GetAtt Queue.Arn
+
+  QueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues: [!Ref Queue]
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: sns.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt Queue.Arn
+
+  Lambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: lambda/
+      Handler: handler.lambda_handler
+      Runtime: python3.11
+      Timeout: 30
+      Environment:
+        Variables:
+          GITHUB_TOKEN: !Ref GitHubToken
+          GITHUB_REPO: !Sub "${AWS::StackName}"
+      Events:
+        SQS:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt Queue.Arn
+      Policies:
+        - CloudWatchLogsFullAccess  # CloudWatch logging
+
+  Api:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: prod
+      DefinitionBody:
+        openapi: 3.0.1
+        paths:
+          /request-rds:
+            post:
+              x-amazon-apigateway-integration:
+                type: aws
+                httpMethod: POST
+                uri: !Sub "arn:aws:apigateway:${AWS::Region}:sns:action/Publish"
+                credentials: !GetAtt ApiRole.Arn
+                requestTemplates:
+                  application/json: !Sub "TopicArn=${Topic}&Message=$input.body"
+                responses:
+                  default:
+                    statusCode: 200
+
+  ApiRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: SNSPublish
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action: sns:Publish
+                Resource: !Ref Topic
+
+Outputs:
+  ApiUrl:
+    Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/prod/request-rds"
