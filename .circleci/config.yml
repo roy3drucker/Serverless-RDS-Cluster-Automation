@@ -17,10 +17,22 @@ jobs:
             cd sam
             sam build
             if [ -n "$GITHUB_TOKEN" ]; then
-              sam deploy --stack-name serverless-rds-automation --region us-east-1 --resolve-s3 --no-confirm-changeset --parameter-overrides GitHubToken=$GITHUB_TOKEN
+              sam deploy \
+                --stack-name serverless-rds-automation \
+                --region us-east-1 \
+               --resolve-s3 \
+                --no-confirm-changeset \
+                --capabilities CAPABILITY_IAM \
+                --parameter-overrides GitHubToken=$GITHUB_TOKEN
             else
-              sam deploy --stack-name serverless-rds-automation --region us-east-1 --resolve-s3 --no-confirm-changeset
+              sam deploy \
+                --stack-name serverless-rds-automation \
+                --region us-east-1 \
+               --resolve-s3 \
+                --no-confirm-changeset \
+                --capabilities CAPABILITY_IAM
             fi
+
 
   deploy-terraform:
     docker:
