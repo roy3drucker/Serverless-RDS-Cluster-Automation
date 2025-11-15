@@ -94,7 +94,7 @@ Resources:
       UsagePlanName: !Sub "${AWS::StackName}-usage-plan"
       ApiStages:
         - ApiId: !Ref Api
-          Stage: prod
+          Stage: !Ref ApiProdStage
       Throttle:
         RateLimit: 100
         BurstLimit: 200
