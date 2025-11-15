@@ -7,6 +7,7 @@ Parameters:
     NoEcho: true
 
 Resources:
+
   Topic:
     Type: AWS::SNS::Topic
 
@@ -51,12 +52,11 @@ Resources:
           Properties:
             Queue: !GetAtt Queue.Arn
       Policies:
-        - CloudWatchLogsFullAccess  # CloudWatch logging
+        - CloudWatchLogsFullAccess
 
   Api:
     Type: AWS::Serverless::Api
     Properties:
-      StageName: prod
       Auth:
         ApiKeyRequired: true
       DefinitionBody:
@@ -82,6 +82,21 @@ Resources:
             name: x-api-key
             in: header
 
+  ApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - Api
+    Properties:
+      RestApiId: !Ref Api
+      StageName: prod
+
+  ApiProdStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      RestApiId: !Ref Api
+      DeploymentId: !Ref ApiDeployment
+      StageName: prod
+
   ApiKey:
     Type: AWS::ApiGateway::ApiKey
     Properties:
@@ -89,7 +104,7 @@ Resources:
       Enabled: true
 
   UsagePlan:
-    Type: AWS::ApiGateway::UsagePlan #לא חובה אבל best practice
+    Type: AWS::ApiGateway::UsagePlan
     Properties:
       UsagePlanName: !Sub "${AWS::StackName}-usage-plan"
       ApiStages:
@@ -100,7 +115,7 @@ Resources:
         BurstLimit: 200
 
   UsagePlanKey:
-    Type: AWS::ApiGateway::UsagePlanKey #לא חובה אבל best practice
+    Type: AWS::ApiGateway::UsagePlanKey
     Properties:
       KeyId: !Ref ApiKey
       KeyType: API_KEY
@@ -126,6 +141,7 @@ Resources:
 Outputs:
   ApiUrl:
     Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/prod/request-rds"
-  ApiKey:
+
+  ApiKeyOutput:
     Value: !Ref ApiKey
     Description: "API Key for authentication"
