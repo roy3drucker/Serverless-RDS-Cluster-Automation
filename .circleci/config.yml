@@ -1,81 +1,72 @@
 version: 2.1
 
 orbs:
-  aws-cli: circleci/aws-cli@4.1.3
+  aws-cli: circleci/aws-cli@4.0.0
+  sam: circleci/aws-sam@2.0.0
+  terraform: circleci/terraform@3.2.1
+  github-cli: circleci/github-cli@2.0.0
 
-jobs:
-  deploy-sam:
+executors:
+  python-executor:
     docker:
       - image: cimg/python:3.11
+    working_directory: ~/project
+
+jobs:
+  install-dependencies:
+    executor: python-executor
     steps:
       - checkout
-      - aws-cli/setup
       - run:
-          name: Deploy SAM
+          name: Install Python dependencies
           command: |
-            pip install aws-sam-cli
-            cd sam
+            pip install -r requirements.txt || true
+
+  deploy-sam:
+    executor: sam/default
+    steps:
+      - checkout
+      - run:
+          name: Deploy SAM stack
+          command: |
             sam build
-            sam deploy --no-confirm-changeset --parameter-overrides GitHubToken=$GITHUB_TOKEN
+            sam deploy --no-confirm-changeset --no-fail-on-empty-changeset \
+              --stack-name serverless-rds-automation \
+              --capabilities CAPABILITY_NAMED_IAM \
+              --region $AWS_REGION \
+              --parameter-overrides \
+                Environment=$ENV \
+                GitHubToken=$GITHUB_TOKEN
 
-  deploy-terraform:
-    docker:
-      - image: cimg/base:stable
+  terraform-apply:
+    executor: terraform/default
     steps:
       - checkout
-      - aws-cli/setup
-      - run:
-          name: Install Terraform
-          command: |
-            wget https://releases.hashicorp.com/terraform/1.6.0/terraform_1.6.0_linux_amd64.zip
-            unzip terraform_1.6.0_linux_amd64.zip
-            sudo mv terraform /usr/local/bin/
-      - run:
-          name: Deploy Terraform
-          command: |
-            if [ -d "terraform-instances" ] && [ "$(ls -A terraform-instances/*.tf 2>/dev/null)" ]; then
-              cd terraform-instances
-              terraform init
-              terraform apply -auto-approve
-            fi
-
-  cleanup-resources:
-    docker:
-      - image: cimg/base:stable
-    steps:
-      - checkout
-      - aws-cli/setup
-      - run:
-          name: Install Terraform
-          command: |
-            wget https://releases.hashicorp.com/terraform/1.6.0/terraform_1.6.0_linux_amd64.zip
-            unzip terraform_1.6.0_linux_amd64.zip
-            sudo mv terraform /usr/local/bin/
-      - run:
-          name: Cleanup Terraform Resources
-          command: |
-            if [ -d "terraform-instances" ] && [ "$(ls -A terraform-instances/*.tf 2>/dev/null)" ]; then
-              cd terraform-instances
-              terraform init
-              terraform destroy -auto-approve
-            fi
-      - run:
-          name: Cleanup SAM Resources
-          command: |
-            pip install aws-sam-cli
-            sam delete --stack-name serverless-rds-automation --no-prompts || true
+      - terraform/init:
+          path: terraform/
+      - terraform/validate:
+          path: terraform/
+      - terraform/apply:
+          path: terraform/
+          auto-approve: true
 
 workflows:
-  deploy:
+  version: 2
+
+  deploy-and-provision:
     jobs:
+      - install-dependencies
+
       - deploy-sam:
+          requires:
+            - install-dependencies
           filters:
             branches:
               only: main
-      - deploy-terraform:
+
+      - terraform-apply:
           requires:
             - deploy-sam
           filters:
             branches:
               only: main
-
