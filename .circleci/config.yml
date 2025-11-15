@@ -9,6 +9,9 @@ executors:
     docker:
       - image: cimg/python:3.11
     working_directory: ~/project
+    environment:
+      AWS_REGION: us-east-1
+      SAM_CLI_TELEMETRY: 0
 
 jobs:
   build-and-test:
@@ -20,7 +23,7 @@ jobs:
           command: |
             pip install aws-sam-cli
             cd sam
-            sam validate
+            sam validate --region $AWS_REGION
             sam build
 
   install-dependencies:
@@ -33,16 +36,15 @@ jobs:
             pip install -r requirements.txt || true
             pip install aws-sam-cli
 
-            # Optional cleanup if stack stuck
-            aws cloudformation delete-stack --stack-name serverless-rds-automation --region us-east-1 || true
-            aws cloudformation wait stack-delete-complete --stack-name serverless-rds-automation --region us-east-1 || true
+            aws cloudformation delete-stack --stack-name serverless-rds-automation --region $AWS_REGION || true
+            aws cloudformation wait stack-delete-complete --stack-name serverless-rds-automation --region $AWS_REGION || true
 
             cd sam
             sam build
 
             sam deploy \
               --stack-name serverless-rds-automation \
-              --region us-east-1 \
+              --region $AWS_REGION \
               --resolve-s3 \
               --no-confirm-changeset \
               --no-fail-on-empty-changeset \
@@ -92,8 +94,8 @@ jobs:
           name: Cleanup SAM stack
           command: |
             pip install aws-sam-cli
-            if aws cloudformation describe-stacks --stack-name serverless-rds-automation >/dev/null 2>&1; then
-              sam delete --stack-name serverless-rds-automation --no-prompts
+            if aws cloudformation describe-stacks --stack-name serverless-rds-automation --region $AWS_REGION >/dev/null 2>&1; then
+              sam delete --stack-name serverless-rds-automation --no-prompts --region $AWS_REGION
             else
               echo "Stack not found, skipping."
             fi
