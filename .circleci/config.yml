@@ -13,8 +13,7 @@ executors:
 
 jobs:
   build-and-test:
-    docker:
-      - image: cimg/python:3.11
+    executor: python-executor
     steps:
       - checkout
       - run:
@@ -35,7 +34,7 @@ jobs:
             pip install -r requirements.txt || true
             pip install aws-sam-cli
 
-            # Clean previous broken stacks
+            # Clean previous broken stacks (optional)
             aws cloudformation delete-stack --stack-name serverless-rds-automation --region us-east-1 || true
             aws cloudformation wait stack-delete-complete --stack-name serverless-rds-automation --region us-east-1 || true
 
@@ -55,13 +54,13 @@ jobs:
                 StageName=$ENV
 
   deploy-sam:
-    executor: sam/default
+    executor: python-executor
     steps:
       - checkout
-      - aws-cli/setup
       - run:
-          name: Deploy SAM
+          name: Deploy SAM stack
           command: |
+            pip install aws-sam-cli
             sam build
             sam deploy \
               --stack-name serverless-rds-automation \
@@ -87,11 +86,9 @@ jobs:
           auto-approve: true
 
   cleanup-resources:
-    docker:
-      - image: cimg/python:3.11
+    executor: python-executor
     steps:
       - checkout
-      - aws-cli/setup
       - run:
           name: Cleanup SAM stack
           command: |
