@@ -8,6 +8,21 @@ orbs:
 
 executors:
   python-executor:
+jobs:
+  build-and-test:
+    docker:
+      - image: cimg/python:3.11
+    steps:
+      - checkout
+      - run:
+          name: Validate SAM template
+          command: |
+            pip install aws-sam-cli
+            cd sam
+            sam validate
+            sam build
+
+  deploy-sam:
     docker:
       - image: cimg/python:3.11
     working_directory: ~/project
@@ -20,12 +35,47 @@ jobs:
       - run:
           name: Install Python dependencies
           command: |
+
             pip install -r requirements.txt || true
+
+            pip install aws-sam-cli
+            # Delete existing failed stack if it exists
+            aws cloudformation delete-stack --stack-name serverless-rds-automation --region us-east-1 || true
+            aws cloudformation wait stack-delete-complete --stack-name serverless-rds-automation --region us-east-1 || true
+            cd sam
+            sam build
+            if [ -n "$GITHUB_TOKEN" ]; then
+              sam deploy \
+                --stack-name serverless-rds-automation \
+                --region us-east-1 \
+                --resolve-s3 \
+                --no-fail-on-empty-changeset \
+                --no-confirm-changeset \
+                --capabilities CAPABILITY_IAM \
+                --parameter-overrides GitHubToken=$GITHUB_TOKEN
+            else
+              sam deploy \
+                --stack-name serverless-rds-automation \
+                --region us-east-1 \
+                --resolve-s3 \
+                --no-fail-on-empty-changeset \
+                --no-confirm-changeset \
+                --capabilities CAPABILITY_IAM
+            fi
+
+
 
   deploy-sam:
     executor: sam/default
     steps:
       - checkout
+      - aws-cli/setup
+      - run:
+          name: Install Terraform
+          command: |
+            wget https://releases.hashicorp.com/terraform/1.6.0/terraform_1.6.0_linux_amd64.zip
+            unzip terraform_1.6.0_linux_amd64.zip
+            mv terraform /usr/local/bin/
       - run:
           name: Deploy SAM stack
           command: |
@@ -50,16 +100,39 @@ jobs:
           path: terraform/
           auto-approve: true
 
+  cleanup-resources:
+    docker:
+      - image: cimg/python:3.11
+    steps:
+      - checkout
+      - aws-cli/setup
+      - run:
+          name: Cleanup SAM Resources
+          command: |
+            pip install aws-sam-cli
+            if aws cloudformation describe-stacks --stack-name serverless-rds-automation >/dev/null 2>&1; then
+              sam delete --stack-name serverless-rds-automation --no-prompts
+            else
+              echo "Stack not found, skipping deletion."
+            fi
+
 workflows:
   version: 2
 
   deploy-and-provision:
     jobs:
+    
       - install-dependencies
 
       - deploy-sam:
           requires:
             - install-dependencies
+
+      - build-and-test
+      - deploy-sam:
+          requires:
+            - build-and-test
+
           filters:
             branches:
               only: main
@@ -70,3 +143,13 @@ workflows:
           filters:
             branches:
               only: main
+
+  cleanup-scheduled:
+    triggers:
+      - schedule:
+          cron: "0 0,2,4,6,8,10,12,14,16,18,20,22 * * *"  # Every 2 hours
+          filters:
+            branches:
+              only: main
+    jobs:
+      - cleanup-resources
