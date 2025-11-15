@@ -5,12 +5,11 @@ Parameters:
   GitHubToken:
     Type: String
     NoEcho: true
-
-    Description: GitHub Personal Access Token (used by Lambda to create PRs)
+    Description: GitHub Personal Access Token
 
   GitHubRepo:
     Type: String
-    Description: GitHub repository in format owner/repo (e.g. user/project)
+    Description: GitHub repository (owner/repo)
 
   StageName:
     Type: String
@@ -18,30 +17,16 @@ Parameters:
     AllowedValues:
       - dev
       - prod
-    Description: Deployment stage/environment name
-
-    Default: ""
+    Description: Deployment stage
 
 Resources:
-
   Topic:
     Type: AWS::SNS::Topic
-    Properties:
-      Tags:
-        - Key: Project
-          Value: ServerlessRDS
-        - Key: Environment
-          Value: !Ref StageName
 
   Queue:
     Type: AWS::SQS::Queue
     Properties:
       VisibilityTimeout: 60
-      Tags:
-        - Key: Project
-          Value: ServerlessRDS
-        - Key: Environment
-          Value: !Ref StageName
 
   Subscription:
     Type: AWS::SNS::Subscription
@@ -81,7 +66,6 @@ Resources:
           Properties:
             Queue: !GetAtt Queue.Arn
       Policies:
-
         - Statement:
             - Effect: Allow
               Action:
@@ -89,10 +73,6 @@ Resources:
                 - logs:CreateLogStream
                 - logs:PutLogEvents
               Resource: "*"
-      Tags:
-        Project: ServerlessRDS
-        Environment: !Ref StageName
-        - CloudWatchLogsFullAccess
 
   Api:
     Type: AWS::Serverless::Api
@@ -131,9 +111,6 @@ Resources:
 
   UsagePlan:
     Type: AWS::ApiGateway::UsagePlan
-
-    DependsOn:
-      - Api
     Properties:
       UsagePlanName: !Sub "${AWS::StackName}-usage-plan"
       ApiStages:
@@ -172,12 +149,7 @@ Outputs:
   ApiUrl:
     Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/${StageName}/request-rds"
     Description: "API endpoint to request RDS cluster"
+
   ApiKey:
     Value: !Ref ApiKey
     Description: "API Key for client access"
-
-    Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/prod/request-rds"
-
-  ApiKeyOutput:
-    Value: !Ref ApiKey
-    Description: "API Key for authentication"
