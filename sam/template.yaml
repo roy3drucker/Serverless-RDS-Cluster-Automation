@@ -5,15 +5,39 @@ Parameters:
   GitHubToken:
     Type: String
     NoEcho: true
+    Description: GitHub Personal Access Token (used by Lambda to create PRs)
+
+  GitHubRepo:
+    Type: String
+    Description: GitHub repository in format owner/repo (e.g. user/project)
+
+  StageName:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - prod
+    Description: Deployment stage/environment name
 
 Resources:
   Topic:
     Type: AWS::SNS::Topic
+    Properties:
+      Tags:
+        - Key: Project
+          Value: ServerlessRDS
+        - Key: Environment
+          Value: !Ref StageName
 
   Queue:
     Type: AWS::SQS::Queue
     Properties:
       VisibilityTimeout: 60
+      Tags:
+        - Key: Project
+          Value: ServerlessRDS
+        - Key: Environment
+          Value: !Ref StageName
 
   Subscription:
     Type: AWS::SNS::Subscription
@@ -21,6 +45,7 @@ Resources:
       Protocol: sqs
       TopicArn: !Ref Topic
       Endpoint: !GetAtt Queue.Arn
+      RawMessageDelivery: true
 
   QueuePolicy:
     Type: AWS::SQS::QueuePolicy
@@ -44,19 +69,29 @@ Resources:
       Environment:
         Variables:
           GITHUB_TOKEN: !Ref GitHubToken
-          GITHUB_REPO: !Sub "${AWS::StackName}"
+          GITHUB_REPO: !Ref GitHubRepo
+          ENV: !Ref StageName
       Events:
         SQS:
           Type: SQS
           Properties:
             Queue: !GetAtt Queue.Arn
       Policies:
-        - CloudWatchLogsFullAccess  # CloudWatch logging
+        - Statement:
+            - Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: "*"
+      Tags:
+        Project: ServerlessRDS
+        Environment: !Ref StageName
 
   Api:
     Type: AWS::Serverless::Api
     Properties:
-      StageName: prod
+      StageName: !Ref StageName
       Auth:
         ApiKeyRequired: true
       DefinitionBody:
@@ -89,18 +124,18 @@ Resources:
       Enabled: true
 
   UsagePlan:
-    Type: AWS::ApiGateway::UsagePlan #לא חובה אבל best practice
+    Type: AWS::ApiGateway::UsagePlan
     Properties:
       UsagePlanName: !Sub "${AWS::StackName}-usage-plan"
       ApiStages:
         - ApiId: !Ref Api
-          Stage: prod
+          Stage: !Ref StageName
       Throttle:
         RateLimit: 100
         BurstLimit: 200
 
   UsagePlanKey:
-    Type: AWS::ApiGateway::UsagePlanKey #לא חובה אבל best practice
+    Type: AWS::ApiGateway::UsagePlanKey
     Properties:
       KeyId: !Ref ApiKey
       KeyType: API_KEY
@@ -110,6 +145,7 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
+        Version: '2012-10-17'
         Statement:
           - Effect: Allow
             Principal:
@@ -125,7 +161,8 @@ Resources:
 
 Outputs:
   ApiUrl:
-    Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/prod/request-rds"
+    Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/${StageName}/request-rds"
+    Description: "API endpoint to request RDS cluster"
   ApiKey:
     Value: !Ref ApiKey
-    Description: "API Key for authentication"
+    Description: "API Key for client access"
