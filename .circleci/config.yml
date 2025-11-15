@@ -23,7 +23,8 @@ jobs:
               sam deploy \
                 --stack-name serverless-rds-automation \
                 --region us-east-1 \
-               --resolve-s3 \
+                --resolve-s3 \
+                --no-fail-on-empty-changeset \
                 --no-confirm-changeset \
                 --capabilities CAPABILITY_IAM \
                 --parameter-overrides GitHubToken=$GITHUB_TOKEN
@@ -31,7 +32,8 @@ jobs:
               sam deploy \
                 --stack-name serverless-rds-automation \
                 --region us-east-1 \
-               --resolve-s3 \
+                --resolve-s3 \
+                --no-fail-on-empty-changeset \
                 --no-confirm-changeset \
                 --capabilities CAPABILITY_IAM
             fi

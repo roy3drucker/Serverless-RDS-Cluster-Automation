@@ -5,6 +5,7 @@ Parameters:
   GitHubToken:
     Type: String
     NoEcho: true
+    Default: ""
 
 Resources:
 
