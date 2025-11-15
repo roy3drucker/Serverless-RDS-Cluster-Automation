@@ -1,7 +1,6 @@
 version = 0.1
 
 [default]
-[default.deploy]
 [default.deploy.parameters]
 stack_name = "serverless-rds-cluster"
 resolve_s3 = true
