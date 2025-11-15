@@ -57,6 +57,7 @@ Resources:
   Api:
     Type: AWS::Serverless::Api
     Properties:
+      StageName: prod
       Auth:
         ApiKeyRequired: true
       DefinitionBody:
