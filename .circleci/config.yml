@@ -14,6 +14,9 @@ jobs:
           name: Deploy SAM
           command: |
             pip install aws-sam-cli
+            # Delete existing failed stack if it exists
+            aws cloudformation delete-stack --stack-name serverless-rds-automation --region us-east-1 || true
+            aws cloudformation wait stack-delete-complete --stack-name serverless-rds-automation --region us-east-1 || true
             cd sam
             sam build
             if [ -n "$GITHUB_TOKEN" ]; then
