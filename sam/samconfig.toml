@@ -1,0 +1,10 @@
+version = 0.1
+
+[default]
+[default.deploy]
+[default.deploy.parameters]
+stack_name = "serverless-rds-cluster"
+resolve_s3 = true
+region = "us-east-1"
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "GitHubToken="
