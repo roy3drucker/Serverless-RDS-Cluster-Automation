@@ -2,7 +2,6 @@ version: 2.1
 
 orbs:
   aws-cli: circleci/aws-cli@4.0.0
-  terraform: circleci/terraform@3.2.1
   github-cli: circleci/github-cli@2.0.0
 
 executors:
@@ -34,7 +33,7 @@ jobs:
             pip install -r requirements.txt || true
             pip install aws-sam-cli
 
-            # Clean previous broken stacks (optional)
+            # Optional cleanup if stack stuck
             aws cloudformation delete-stack --stack-name serverless-rds-automation --region us-east-1 || true
             aws cloudformation wait stack-delete-complete --stack-name serverless-rds-automation --region us-east-1 || true
 
@@ -74,16 +73,16 @@ jobs:
                 StageName=$ENV
 
   terraform-apply:
-    executor: terraform/default
+    executor: python-executor
     steps:
       - checkout
-      - terraform/init:
-          path: terraform/
-      - terraform/validate:
-          path: terraform/
-      - terraform/apply:
-          path: terraform/
-          auto-approve: true
+      - run:
+          name: Terraform Apply
+          command: |
+            cd terraform
+            terraform init
+            terraform validate
+            terraform apply -auto-approve
 
   cleanup-resources:
     executor: python-executor
