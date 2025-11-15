@@ -5,6 +5,7 @@ Parameters:
   GitHubToken:
     Type: String
     NoEcho: true
+    Default: ""
 
 Resources:
 
@@ -83,21 +84,6 @@ Resources:
             name: x-api-key
             in: header
 
-  ApiDeployment:
-    Type: AWS::ApiGateway::Deployment
-    DependsOn:
-      - Api
-    Properties:
-      RestApiId: !Ref Api
-      StageName: prod
-
-  ApiProdStage:
-    Type: AWS::ApiGateway::Stage
-    Properties:
-      RestApiId: !Ref Api
-      DeploymentId: !Ref ApiDeployment
-      StageName: prod
-
   ApiKey:
     Type: AWS::ApiGateway::ApiKey
     Properties:
@@ -106,11 +92,13 @@ Resources:
 
   UsagePlan:
     Type: AWS::ApiGateway::UsagePlan
+    DependsOn:
+      - Api
     Properties:
       UsagePlanName: !Sub "${AWS::StackName}-usage-plan"
       ApiStages:
         - ApiId: !Ref Api
-          Stage: !Ref ApiProdStage
+          Stage: prod
       Throttle:
         RateLimit: 100
         BurstLimit: 200
