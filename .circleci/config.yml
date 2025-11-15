@@ -8,6 +8,10 @@ orbs:
 
 executors:
   python-executor:
+    docker:
+      - image: cimg/python:3.11
+    working_directory: ~/project
+
 jobs:
   build-and-test:
     docker:
@@ -22,48 +26,34 @@ jobs:
             sam validate
             sam build
 
-  deploy-sam:
-    docker:
-      - image: cimg/python:3.11
-    working_directory: ~/project
-
-jobs:
   install-dependencies:
     executor: python-executor
     steps:
       - checkout
       - run:
-          name: Install Python dependencies
+          name: Install dependencies and deploy SAM
           command: |
-
             pip install -r requirements.txt || true
-
             pip install aws-sam-cli
-            # Delete existing failed stack if it exists
+
+            # Clean previous broken stacks
             aws cloudformation delete-stack --stack-name serverless-rds-automation --region us-east-1 || true
             aws cloudformation wait stack-delete-complete --stack-name serverless-rds-automation --region us-east-1 || true
+
             cd sam
             sam build
-            if [ -n "$GITHUB_TOKEN" ]; then
-              sam deploy \
-                --stack-name serverless-rds-automation \
-                --region us-east-1 \
-                --resolve-s3 \
-                --no-fail-on-empty-changeset \
-                --no-confirm-changeset \
-                --capabilities CAPABILITY_IAM \
-                --parameter-overrides GitHubToken=$GITHUB_TOKEN
-            else
-              sam deploy \
-                --stack-name serverless-rds-automation \
-                --region us-east-1 \
-                --resolve-s3 \
-                --no-fail-on-empty-changeset \
-                --no-confirm-changeset \
-                --capabilities CAPABILITY_IAM
-            fi
 
-
+            sam deploy \
+              --stack-name serverless-rds-automation \
+              --region us-east-1 \
+              --resolve-s3 \
+              --no-confirm-changeset \
+              --no-fail-on-empty-changeset \
+              --capabilities CAPABILITY_IAM \
+              --parameter-overrides \
+                GitHubToken=$GITHUB_TOKEN \
+                GitHubRepo=$GITHUB_REPO \
+                StageName=$ENV
 
   deploy-sam:
     executor: sam/default
@@ -71,22 +61,19 @@ jobs:
       - checkout
       - aws-cli/setup
       - run:
-          name: Install Terraform
-          command: |
-            wget https://releases.hashicorp.com/terraform/1.6.0/terraform_1.6.0_linux_amd64.zip
-            unzip terraform_1.6.0_linux_amd64.zip
-            mv terraform /usr/local/bin/
-      - run:
-          name: Deploy SAM stack
+          name: Deploy SAM
           command: |
             sam build
-            sam deploy --no-confirm-changeset --no-fail-on-empty-changeset \
+            sam deploy \
               --stack-name serverless-rds-automation \
-              --capabilities CAPABILITY_NAMED_IAM \
               --region $AWS_REGION \
+              --capabilities CAPABILITY_NAMED_IAM \
+              --no-confirm-changeset \
+              --no-fail-on-empty-changeset \
               --parameter-overrides \
-                Environment=$ENV \
-                GitHubToken=$GITHUB_TOKEN
+                GitHubToken=$GITHUB_TOKEN \
+                GitHubRepo=$GITHUB_REPO \
+                StageName=$ENV
 
   terraform-apply:
     executor: terraform/default
@@ -107,13 +94,13 @@ jobs:
       - checkout
       - aws-cli/setup
       - run:
-          name: Cleanup SAM Resources
+          name: Cleanup SAM stack
           command: |
             pip install aws-sam-cli
             if aws cloudformation describe-stacks --stack-name serverless-rds-automation >/dev/null 2>&1; then
               sam delete --stack-name serverless-rds-automation --no-prompts
             else
-              echo "Stack not found, skipping deletion."
+              echo "Stack not found, skipping."
             fi
 
 workflows:
@@ -121,22 +108,16 @@ workflows:
 
   deploy-and-provision:
     jobs:
-    
-      - install-dependencies
-
+      - build-and-test
+      - install-dependencies:
+          requires:
+            - build-and-test
       - deploy-sam:
           requires:
             - install-dependencies
-
-      - build-and-test
-      - deploy-sam:
-          requires:
-            - build-and-test
-
           filters:
             branches:
               only: main
-
       - terraform-apply:
           requires:
             - deploy-sam
@@ -147,7 +128,7 @@ workflows:
   cleanup-scheduled:
     triggers:
       - schedule:
-          cron: "0 0,2,4,6,8,10,12,14,16,18,20,22 * * *"  # Every 2 hours
+          cron: "0 0,2,4,6,8,10,12,14,16,18,20,22 * * *"
           filters:
             branches:
               only: main
