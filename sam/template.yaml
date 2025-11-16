@@ -17,9 +17,10 @@ Parameters:
     AllowedValues:
       - dev
       - prod
-    Description: Deployment stage
+    Description: Deployment stage (used as API Gateway stage name)
 
 Resources:
+
   Topic:
     Type: AWS::SNS::Topic
 
@@ -39,8 +40,10 @@ Resources:
   QueuePolicy:
     Type: AWS::SQS::QueuePolicy
     Properties:
-      Queues: [!Ref Queue]
+      Queues:
+        - !Ref Queue
       PolicyDocument:
+        Version: "2012-10-17"
         Statement:
           - Effect: Allow
             Principal:
@@ -77,11 +80,15 @@ Resources:
   Api:
     Type: AWS::Serverless::Api
     Properties:
+      Name: !Sub "${AWS::StackName}-api"
       StageName: !Ref StageName
       Auth:
         ApiKeyRequired: true
       DefinitionBody:
         openapi: 3.0.1
+        info:
+          title: RDS Cluster API
+          version: 1.0
         paths:
           /request-rds:
             post:
@@ -140,6 +147,7 @@ Resources:
       Policies:
         - PolicyName: SNSPublish
           PolicyDocument:
+            Version: "2012-10-17"
             Statement:
               - Effect: Allow
                 Action: sns:Publish
@@ -147,9 +155,9 @@ Resources:
 
 Outputs:
   ApiUrl:
+    Description: API endpoint to request RDS cluster
     Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/${StageName}/request-rds"
-    Description: "API endpoint to request RDS cluster"
 
   ApiKey:
+    Description: API Key for client access
     Value: !Ref ApiKey
-    Description: "API Key for client access"
