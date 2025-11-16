@@ -1,133 +1,129 @@
 version: 2.1
 
-orbs:
-  aws-cli: circleci/aws-cli@4.0.0
-  github-cli: circleci/github-cli@2.0.0
+commands:
+  install_sam:
+    steps:
+      - run:
+          name: Install AWS SAM CLI
+          command: |
+            python -m pip install --upgrade pip
+            pip install aws-sam-cli==1.116.0
+  install_terraform:
+    steps:
+      - run:
+          name: Install Terraform 1.7.x
+          command: |
+            sudo apt-get update
+            sudo apt-get install -y unzip curl
+            curl -fsSL https://releases.hashicorp.com/terraform/1.7.5/terraform_1.7.5_linux_amd64.zip -o /tmp/terraform.zip
+            sudo unzip -o /tmp/terraform.zip -d /usr/local/bin
+            terraform version
 
 executors:
   python-executor:
     docker:
       - image: cimg/python:3.11
     working_directory: ~/project
-    environment:
-      AWS_REGION: us-east-1
-      SAM_CLI_TELEMETRY: 0
 
 jobs:
-  build-and-test:
+  validate:
     executor: python-executor
     steps:
       - checkout
+      - install_sam
+      - install_terraform
       - run:
           name: Validate SAM template
           command: |
-            pip install aws-sam-cli
             cd sam
-            sam validate --region $AWS_REGION
+            sam validate --region "$AWS_REGION"
             sam build
+      - run:
+          name: Terraform lint & validate
+          command: |
+            cd terraform
+            terraform init -backend=false
+            terraform fmt -check
+            terraform validate
 
-  install-dependencies:
+  deploy_sam:
     executor: python-executor
     steps:
       - checkout
+      - install_sam
       - run:
-          name: Install dependencies and deploy SAM
+          name: Deploy SAM stack
           command: |
-            pip install -r requirements.txt || true
-            pip install aws-sam-cli
-
-            aws cloudformation delete-stack --stack-name serverless-rds-automation --region $AWS_REGION || true
-            aws cloudformation wait stack-delete-complete --stack-name serverless-rds-automation --region $AWS_REGION || true
-
             cd sam
             sam build
-
             sam deploy \
               --stack-name serverless-rds-automation \
-              --region $AWS_REGION \
+              --region "$AWS_REGION" \
               --resolve-s3 \
               --no-confirm-changeset \
               --no-fail-on-empty-changeset \
               --capabilities CAPABILITY_IAM \
               --parameter-overrides \
-                GitHubToken=$GITHUB_TOKEN \
-                GitHubRepo=$GITHUB_REPO \
-                StageName=$ENV
+                GitHubToken="$GITHUB_TOKEN" \
+                GitHubRepo="$GITHUB_REPO" \
+                StageName="$ENV" \
+                CustomDomainName="${CUSTOM_DOMAIN_NAME:-}" \
+                CertificateArn="${CERTIFICATE_ARN:-}" \
+                HostedZoneId="${HOSTED_ZONE_ID:-}"
 
-  deploy-sam:
+  terraform_apply:
     executor: python-executor
     steps:
       - checkout
+      - install_terraform
       - run:
-          name: Deploy SAM stack
-          command: |
-            pip install aws-sam-cli
-            sam build
-            sam deploy \
-              --stack-name serverless-rds-automation \
-              --region $AWS_REGION \
-              --capabilities CAPABILITY_NAMED_IAM \
-              --no-confirm-changeset \
-              --no-fail-on-empty-changeset \
-              --parameter-overrides \
-                GitHubToken=$GITHUB_TOKEN \
-                GitHubRepo=$GITHUB_REPO \
-                StageName=$ENV
-
-  terraform-apply:
-    executor: python-executor
-    steps:
-      - checkout
-      - run:
-          name: Terraform Apply
+          name: Terraform apply for merged PRs
           command: |
             cd terraform
             terraform init
-            terraform validate
+            terraform workspace select "$ENV" || terraform workspace new "$ENV"
             terraform apply -auto-approve
 
-  cleanup-resources:
+  cleanup_stack:
     executor: python-executor
     steps:
       - checkout
+      - install_sam
       - run:
-          name: Cleanup SAM stack
+          name: Cleanup SAM stack (scheduled)
           command: |
-            pip install aws-sam-cli
-            if aws cloudformation describe-stacks --stack-name serverless-rds-automation --region $AWS_REGION >/dev/null 2>&1; then
-              sam delete --stack-name serverless-rds-automation --no-prompts --region $AWS_REGION
+            if aws cloudformation describe-stacks --stack-name serverless-rds-automation --region "$AWS_REGION" >/dev/null 2>&1; then
+              sam delete --stack-name serverless-rds-automation --no-prompts --region "$AWS_REGION"
             else
-              echo "Stack not found, skipping."
+              echo "Stack not found, skipping"
             fi
 
 workflows:
   version: 2
 
-  deploy-and-provision:
+  validate-every-commit:
     jobs:
-      - build-and-test
-      - install-dependencies:
-          requires:
-            - build-and-test
-      - deploy-sam:
-          requires:
-            - install-dependencies
+      - validate
+
+  deploy-on-main:
+    jobs:
+      - deploy_sam:
           filters:
             branches:
               only: main
-      - terraform-apply:
+      - terraform_apply:
           requires:
-            - deploy-sam
+            - deploy_sam
           filters:
             branches:
               only: main
 
-  cleanup-scheduled:
+  cleanup-nightly:
     triggers:
       - schedule:
-          cron: "0 0,2,4,6,8,10,12,14,16,18,20,22 * * *"
+          cron: "0 3 * * *"
           filters:
             branches:
               only: main
     jobs:
-      - cleanup-resources
+      - cleanup_stack

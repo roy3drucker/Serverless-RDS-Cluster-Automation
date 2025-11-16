@@ -1,15 +1,16 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
+Description: Serverless entry point for requesting RDS clusters via SNS/SQS backed Lambda.
 
 Parameters:
   GitHubToken:
     Type: String
     NoEcho: true
-    Description: GitHub Personal Access Token
+    Description: GitHub Personal Access Token used by the Lambda function.
 
   GitHubRepo:
     Type: String
-    Description: GitHub repository (owner/repo)
+    Description: GitHub repository that stores the Terraform module (format: owner/repo).
 
   StageName:
     Type: String
@@ -17,135 +18,214 @@ Parameters:
     AllowedValues:
       - dev
       - prod
-    Description: Deployment stage
+    Description: Deployment stage that also controls the Lambda ENV variable.
+
+  CustomDomainName:
+    Type: String
+    Default: ''
+    Description: Fully qualified domain name that fronts the API Gateway (leave empty to skip).
+
+  CertificateArn:
+    Type: String
+    Default: ''
+    Description: ACM certificate ARN for the custom domain (ignored when CustomDomainName is empty).
+
+  HostedZoneId:
+    Type: String
+    Default: ''
+    Description: Route53 hosted zone ID for the custom domain (ignored when CustomDomainName is empty).
+
+  RequestTopicName:
+    Type: String
+    Default: serverless-rds-requests
+    Description: SNS topic name for incoming RDS cluster requests.
+
+  RequestQueueName:
+    Type: String
+    Default: serverless-rds-requests
+    Description: SQS queue name that buffers incoming requests for Lambda.
+
+  DeadLetterQueueName:
+    Type: String
+    Default: serverless-rds-requests-dlq
+    Description: Name of the SQS dead-letter queue.
+
+  SecretsManagerName:
+    Type: String
+    Default: serverless-rds/github
+    Description: Secrets Manager secret that stores GitHub metadata (fallback for the Lambda function).
+
+  CleanupScheduleExpression:
+    Type: String
+    Default: rate(1 day)
+    Description: EventBridge schedule expression for cleanup notifications.
+
+Conditions:
+  HasCustomDomain: !Not [!Equals [!Ref CustomDomainName, '']]
 
 Resources:
-  Topic:
-    Type: AWS::SNS::Topic
+  GitHubSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Ref SecretsManagerName
+      Description: Secret that stores GitHub metadata for the provisioning Lambda.
+      SecretString: !Sub |
+        {
+          "token": "${GitHubToken}",
+          "repository": "${GitHubRepo}"
+        }
 
-  Queue:
+  RequestTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Ref RequestTopicName
+
+  RequestDeadLetterQueue:
     Type: AWS::SQS::Queue
     Properties:
-      VisibilityTimeout: 60
+      QueueName: !Ref DeadLetterQueueName
+      MessageRetentionPeriod: 1209600 # 14 days
 
-  Subscription:
-    Type: AWS::SNS::Subscription
+  RequestQueue:
+    Type: AWS::SQS::Queue
     Properties:
-      Protocol: sqs
-      TopicArn: !Ref Topic
-      Endpoint: !GetAtt Queue.Arn
-      RawMessageDelivery: true
+      QueueName: !Ref RequestQueueName
+      VisibilityTimeout: 120
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt RequestDeadLetterQueue.Arn
+        maxReceiveCount: 3
 
   QueuePolicy:
     Type: AWS::SQS::QueuePolicy
     Properties:
-      Queues: [!Ref Queue]
+      Queues:
+        - !Ref RequestQueue
       PolicyDocument:
+        Version: '2012-10-17'
         Statement:
           - Effect: Allow
             Principal:
               Service: sns.amazonaws.com
             Action: sqs:SendMessage
-            Resource: !GetAtt Queue.Arn
+            Resource: !GetAtt RequestQueue.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Ref RequestTopic
 
-  Lambda:
+  QueueSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref RequestTopic
+      Protocol: sqs
+      Endpoint: !GetAtt RequestQueue.Arn
+      RawMessageDelivery: true
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: LambdaSQSPermissions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource: !GetAtt RequestQueue.Arn
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: !Ref RequestTopic
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:DescribeSecret
+                Resource: !Ref GitHubSecret
+
+  RequestProcessorLambda:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: lambda/
       Handler: handler.lambda_handler
       Runtime: python3.11
-      Timeout: 30
+      Timeout: 60
+      MemorySize: 256
+      ReservedConcurrentExecutions: 2
+      Role: !GetAtt LambdaExecutionRole.Arn
       Environment:
         Variables:
           GITHUB_TOKEN: !Ref GitHubToken
           GITHUB_REPO: !Ref GitHubRepo
           ENV: !Ref StageName
+          REQUEST_TOPIC_ARN: !Ref RequestTopic
+          SECRETS_MANAGER_ARN: !Ref GitHubSecret
       Events:
-        SQS:
+        SqsEvent:
           Type: SQS
           Properties:
-            Queue: !GetAtt Queue.Arn
+            Queue: !GetAtt RequestQueue.Arn
+            BatchSize: 5
+            MaximumBatchingWindowInSeconds: 10
+
+  CleanupPublisherLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      InlineCode: |
+        import json
+        import os
+        import boto3
+        from datetime import datetime, timezone
+
+        sns = boto3.client("sns")
+
+        def lambda_handler(event, context):
+          message = {
+            "action": "cleanup",
+            "requested_at": datetime.now(timezone.utc).isoformat()
+          }
+          sns.publish(TopicArn=os.environ["REQUEST_TOPIC_ARN"], Message=json.dumps(message))
+          return {"statusCode": 200}
+      Handler: index.lambda_handler
+      Runtime: python3.11
+      Timeout: 30
+      MemorySize: 128
+      Environment:
+        Variables:
+          REQUEST_TOPIC_ARN: !Ref RequestTopic
       Policies:
         - Statement:
             - Effect: Allow
-              Action:
-                - logs:CreateLogGroup
-                - logs:CreateLogStream
-                - logs:PutLogEvents
-              Resource: "*"
+              Action: sns:Publish
+              Resource: !Ref RequestTopic
 
-  Api:
-    Type: AWS::Serverless::Api
+  CleanupScheduleRule:
+    Type: AWS::Events::Rule
     Properties:
-      Auth:
-        ApiKeyRequired: true
-      DefinitionBody:
-        openapi: 3.0.1
-        paths:
-          /request-rds:
-            post:
-              security:
-                - api_key: []
-              x-amazon-apigateway-integration:
-                type: aws
-                httpMethod: POST
-                uri: !Sub "arn:aws:apigateway:${AWS::Region}:sns:action/Publish"
-                credentials: !GetAtt ApiRole.Arn
-                requestTemplates:
-                  application/json: !Sub "TopicArn=${Topic}&Message=$input.body"
-                responses:
-                  default:
-                    statusCode: 200
-        securityDefinitions:
-          api_key:
-            type: apiKey
-            name: x-api-key
-            in: header
+      Description: Periodically ask for stale clusters to be cleaned up.
+      ScheduleExpression: !Ref CleanupScheduleExpression
+      State: ENABLED
+      Targets:
+        - Id: CleanupPublisher
+          Arn: !GetAtt CleanupPublisherLambda.Arn
 
-  ApiKey:
-    Type: AWS::ApiGateway::ApiKey
+  CleanupPermission:
+    Type: AWS::Lambda::Permission
     Properties:
-      Name: !Sub "${AWS::StackName}-api-key"
-      Enabled: true
-
-  ApiDeployment:
-    Type: AWS::ApiGateway::Deployment
-    DependsOn: Api
-    Properties:
-      RestApiId: !Ref Api
-      Description: Deployment for the custom stage used by the usage plan
-
-  ApiStage:
-    Type: AWS::ApiGateway::Stage
-    Properties:
-      StageName: !Ref StageName
-      Description: !Sub "${StageName} stage for ${AWS::StackName}"
-      DeploymentId: !Ref ApiDeployment
-      RestApiId: !Ref Api
-      MethodSettings:
-        - DataTraceEnabled: true
-          HttpMethod: '*'
-          LoggingLevel: INFO
-          ResourcePath: '/*'
-
-  UsagePlan:
-    Type: AWS::ApiGateway::UsagePlan
-    DependsOn: ApiStage
-    Properties:
-      UsagePlanName: !Sub "${AWS::StackName}-usage-plan"
-      ApiStages:
-        - ApiId: !Ref Api
-          Stage: !Ref ApiStage
-      Throttle:
-        RateLimit: 100
-        BurstLimit: 200
-
-  UsagePlanKey:
-    Type: AWS::ApiGateway::UsagePlanKey
-    Properties:
-      KeyId: !Ref ApiKey
-      KeyType: API_KEY
-      UsagePlanId: !Ref UsagePlan
+      FunctionName: !Ref CleanupPublisherLambda
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt CleanupScheduleRule.Arn
 
   ApiRole:
     Type: AWS::IAM::Role
@@ -158,18 +238,106 @@ Resources:
               Service: apigateway.amazonaws.com
             Action: sts:AssumeRole
       Policies:
-        - PolicyName: SNSPublish
+        - PolicyName: ApiSnsPublish
           PolicyDocument:
+            Version: '2012-10-17'
             Statement:
               - Effect: Allow
                 Action: sns:Publish
-                Resource: !Ref Topic
+                Resource: !Ref RequestTopic
 
-Outputs:
-  ApiUrl:
-    Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/${StageName}/request-rds"
-    Description: "API endpoint to request RDS cluster"
+  RestApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: !Ref StageName
+      Auth:
+        ApiKeyRequired: true
+      Cors:
+        AllowMethods: "POST,OPTIONS"
+        AllowHeaders: "content-type,x-api-key"
+        AllowOrigin: "*"
+      DefinitionBody:
+        openapi: 3.0.1
+        info:
+          title: RDS Request API
+          version: '1.0'
+        paths:
+          /request-rds:
+            post:
+              security:
+                - api_key: []
+              x-amazon-apigateway-integration:
+                type: aws
+                httpMethod: POST
+                uri: !Sub arn:aws:apigateway:${AWS::Region}:sns:action/Publish
+                credentials: !GetAtt ApiRole.Arn
+                passthroughBehavior: when_no_templates
+                requestTemplates:
+                  application/json: !Sub |
+                    Action=Publish&TopicArn=${RequestTopic}&Message=$input.body
+                responses:
+                  default:
+                    statusCode: 200
+        securityDefinitions:
+          api_key:
+            type: apiKey
+            name: x-api-key
+            in: header
+      Domain: !If
+        - HasCustomDomain
+        - DomainName: !Ref CustomDomainName
+          CertificateArn: !Ref CertificateArn
+          Route53:
+            HostedZoneId: !Ref HostedZoneId
+          BasePath:
+            - request-rds
+        - !Ref AWS::NoValue
 
   ApiKey:
+    Type: AWS::ApiGateway::ApiKey
+    Properties:
+      Enabled: true
+      Name: !Sub ${AWS::StackName}-${StageName}-key
+      StageKeys:
+        - RestApiId: !Ref RestApi
+          StageName: !Ref StageName
+
+  UsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    Properties:
+      UsagePlanName: !Sub ${AWS::StackName}-${StageName}-usage
+      ApiStages:
+        - ApiId: !Ref RestApi
+          Stage: !Ref StageName
+      Throttle:
+        BurstLimit: 200
+        RateLimit: 100
+
+  UsagePlanKey:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Properties:
+      KeyId: !Ref ApiKey
+      KeyType: API_KEY
+      UsagePlanId: !Ref UsagePlan
+
+Outputs:
+  ApiInvokeUrl:
+    Description: Invoke URL for the API Gateway stage.
+    Value: !Sub https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}/request-rds
+
+  CustomDomainUrl:
+    Condition: HasCustomDomain
+    Description: Custom domain URL that fronts API Gateway.
+    Value: !Sub https://${CustomDomainName}/request-rds
+
+  QueueName:
+    Description: Name of the main SQS queue.
+    Value: !Ref RequestQueue
+
+  TopicArn:
+    Description: ARN of the SNS topic receiving cluster requests.
+    Value: !Ref RequestTopic
+
+  ApiKeyValue:
+    Description: API key that must be provided by the clients.
     Value: !Ref ApiKey
-    Description: "API Key for client access"
