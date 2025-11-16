@@ -55,7 +55,36 @@ The solution is built using the following components:
 ```bash
 git clone https://github.com/<your-username>/serverless-rds-cluster-automation.git
 cd serverless-rds-cluster-automation
+```
 
+### 2. Install the Lambda dependencies locally
+
+The Lambda function uses `PyGithub`. Install the dependencies before running any local tests or packaging with SAM:
+
+```bash
+cd sam
+pip install -r lambda/requirements.txt
+cd -
+```
+
+### 3. Deploy the SAM stack from your workstation
+
+You can deploy the stack without waiting for CircleCI by running the following commands (make sure the AWS credentials in your shell match the target account/region):
+
+```bash
+cd sam
+sam build
+sam deploy \
+  --stack-name serverless-rds-cluster-automation \
+  --capabilities CAPABILITY_IAM \
+  --parameter-overrides \
+    GitHubToken=<your-github-pat> \
+    GitHubRepo=<owner/repo> \
+    StageName=dev
+cd -
+```
+
+> Tip: run `sam deploy --guided` the first time to persist the parameters inside `samconfig.toml`.
 
 ### **Setup Environment Variables in CircleCI**
 
@@ -71,6 +100,15 @@ ENV	dev or prod (stage name)
 
 ### Deploy the Serverless Stack:
 Deployment is automated via CircleCI when you merged your PR to the main branch.
+
+### 🔧 Troubleshooting: API stage not found
+
+If CloudFormation reports `API Stage not found` for the `AWS::ApiGateway::UsagePlan` resource, confirm that:
+
+1. The `StageName` parameter you pass to SAM matches the stage created in API Gateway (default is `dev`).
+2. The `ApiStage` resource in `sam/template.yaml` is created before the usage plan. Running `sam build && sam deploy` with the updated template in this repository creates the stage explicitly and prevents the race condition that previously caused this error.
+
+After validating the stage name, redeploy the SAM stack and retry the request.
 
 ### How to Use the Automation
 Step 1: Submit an RDS Provisioning Request

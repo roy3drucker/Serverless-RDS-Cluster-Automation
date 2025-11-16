@@ -109,14 +109,34 @@ Resources:
       Name: !Sub "${AWS::StackName}-api-key"
       Enabled: true
 
+  ApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: Api
+    Properties:
+      RestApiId: !Ref Api
+      Description: Deployment for the custom stage used by the usage plan
+
+  ApiStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      StageName: !Ref StageName
+      Description: !Sub "${StageName} stage for ${AWS::StackName}"
+      DeploymentId: !Ref ApiDeployment
+      RestApiId: !Ref Api
+      MethodSettings:
+        - DataTraceEnabled: true
+          HttpMethod: '*'
+          LoggingLevel: INFO
+          ResourcePath: '/*'
+
   UsagePlan:
     Type: AWS::ApiGateway::UsagePlan
-    DependsOn: Api
+    DependsOn: ApiStage
     Properties:
       UsagePlanName: !Sub "${AWS::StackName}-usage-plan"
       ApiStages:
         - ApiId: !Ref Api
-          Stage: !Ref StageName
+          Stage: !Ref ApiStage
       Throttle:
         RateLimit: 100
         BurstLimit: 200
