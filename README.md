@@ -92,7 +92,7 @@ Body:
 Step 2: What Happens Next?
 The request is published to SNS
 
-SQS receives and buffers the message
+SQS receives and buffers the message:
 
 - Lambda is triggered:
 - Parses the request
