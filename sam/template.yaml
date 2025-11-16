@@ -283,16 +283,16 @@ Resources:
             type: apiKey
             name: x-api-key
             in: header
-      Domain: 
+      Domain:
         Fn::If:
           - HasCustomDomain
           -
-              DomainName: !Ref CustomDomainName
-              CertificateArn: !Ref CertificateArn
-              Route53:
-                HostedZoneId: !Ref HostedZoneId
-              BasePath:
-                - request-rds
+            DomainName: !Ref CustomDomainName
+            CertificateArn: !Ref CertificateArn
+            Route53:
+              HostedZoneId: !Ref HostedZoneId
+            BasePath:
+              - request-rds
           - !Ref AWS::NoValue
 
   ApiKey:
