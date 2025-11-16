@@ -63,9 +63,9 @@ jobs:
               --no-confirm-changeset \
               --no-fail-on-empty-changeset \
               --capabilities CAPABILITY_IAM \
-                GitHubToken=$GITHUB_TOKEN \
-                GitHubRepo=$GITHUB_REPO \
-                StageName=$ENV \
+                GitHubToken=GITHUB_TOKEN \
+                GitHubRepo=GITHUB_REPO \
+                StageName=ENV \
                 CertificateArn="${CERTIFICATE_ARN:-}" \
                 HostedZoneId="${HOSTED_ZONE_ID:-}"
 
