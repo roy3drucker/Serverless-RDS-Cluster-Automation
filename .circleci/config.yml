@@ -35,13 +35,13 @@ jobs:
       - run:
           name: Validate SAM template
           command: |
-            cd sam
+            cd sam/template.yaml
             sam validate --region "$AWS_REGION"
             sam build
       - run:
           name: Terraform lint & validate
           command: |
-            cd terraform
+            cd terraform/modules/rds
             terraform init -backend=false
             terraform fmt -check
             terraform validate
