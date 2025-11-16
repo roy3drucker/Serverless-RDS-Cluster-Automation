@@ -10,8 +10,9 @@ Parameters:
 
   GitHubRepo:
     Type: String
-    Description: GitHub repository that stores the Terraform module (format: owner/repo).
-
+    Description: "GitHub repository that stores the Terraform module (format: owner/repo)."
+    Description: GitHub repository that stores the Terraform module (format: owner/repo).     
+    
   StageName:
     Type: String
     Default: dev
