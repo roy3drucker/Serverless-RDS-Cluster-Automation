@@ -63,11 +63,9 @@ jobs:
               --no-confirm-changeset \
               --no-fail-on-empty-changeset \
               --capabilities CAPABILITY_IAM \
-              --parameter-overrides \
                 GitHubToken="$GITHUB_TOKEN" \
                 GitHubRepo="$GITHUB_REPO" \
                 StageName="$ENV" \
-                CustomDomainName="${CUSTOM_DOMAIN_NAME:-}" \
                 CertificateArn="${CERTIFICATE_ARN:-}" \
                 HostedZoneId="${HOSTED_ZONE_ID:-}"
 
