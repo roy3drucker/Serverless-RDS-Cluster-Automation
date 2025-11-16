@@ -62,6 +62,7 @@ Parameters:
 
 Conditions:
   HasCustomDomain: !Not [!Equals [!Ref CustomDomainName, '']]
+  NoCustomDomain: !Equals [!Ref CustomDomainName, '']
 
 Resources:
   GitHubSecret:
@@ -247,8 +248,9 @@ Resources:
                 Resource: !Ref RequestTopic
 
   RestApi:
+    Condition: NoCustomDomain
     Type: AWS::Serverless::Api
-    Properties:
+    Properties: &RestApiCommonProps
       StageName: !Ref StageName
       Auth:
         ApiKeyRequired: true
@@ -283,17 +285,19 @@ Resources:
             type: apiKey
             name: x-api-key
             in: header
-      Domain: 
-        Fn::If:
-          - HasCustomDomain
-          -
-              DomainName: !Ref CustomDomainName
-              CertificateArn: !Ref CertificateArn
-              Route53:
-                HostedZoneId: !Ref HostedZoneId
-              BasePath:
-                - request-rds
-          - !Ref AWS::NoValue
+
+  RestApiWithDomain:
+    Condition: HasCustomDomain
+    Type: AWS::Serverless::Api
+    Properties:
+      <<: *RestApiCommonProps
+      Domain:
+        DomainName: !Ref CustomDomainName
+        CertificateArn: !Ref CertificateArn
+        Route53:
+          HostedZoneId: !Ref HostedZoneId
+        BasePath:
+          - request-rds
 
   ApiKey:
     Type: AWS::ApiGateway::ApiKey
@@ -301,7 +305,7 @@ Resources:
       Enabled: true
       Name: !Sub ${AWS::StackName}-${StageName}-key
       StageKeys:
-        - RestApiId: !Ref RestApi
+        - RestApiId: !If [HasCustomDomain, !Ref RestApiWithDomain, !Ref RestApi]
           StageName: !Ref StageName
 
   UsagePlan:
@@ -309,7 +313,7 @@ Resources:
     Properties:
       UsagePlanName: !Sub ${AWS::StackName}-${StageName}-usage
       ApiStages:
-        - ApiId: !Ref RestApi
+        - ApiId: !If [HasCustomDomain, !Ref RestApiWithDomain, !Ref RestApi]
           Stage: !Ref StageName
       Throttle:
         BurstLimit: 200
@@ -325,7 +329,10 @@ Resources:
 Outputs:
   ApiInvokeUrl:
     Description: Invoke URL for the API Gateway stage.
-    Value: !Sub https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}/request-rds
+    Value: !If
+      - HasCustomDomain
+      - !Sub https://${RestApiWithDomain}.execute-api.${AWS::Region}.amazonaws.com/${StageName}/request-rds
+      - !Sub https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}/request-rds
 
   CustomDomainUrl:
     Condition: HasCustomDomain
