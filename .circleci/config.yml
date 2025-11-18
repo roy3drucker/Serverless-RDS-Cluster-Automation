@@ -1,99 +1,144 @@
 version: 2.1
 
 orbs:
-  aws-cli: circleci/aws-cli@4.1.3
+  aws-cli: circleci/aws-cli@4.0
 
-jobs:
-  deploy-sam:
+commands:
+  install_sam:
+    steps:
+      - run:
+          name: Install AWS SAM CLI
+          command: |
+            python -m pip install --upgrade pip
+            pip install aws-sam-cli==1.116.0
+  install_terraform:
+    steps:
+      - run:
+          name: Install Terraform 1.7.x
+          command: |
+            sudo apt-get update
+            sudo apt-get install -y unzip curl
+            curl -fsSL https://releases.hashicorp.com/terraform/1.7.5/terraform_1.7.5_linux_amd64.zip -o /tmp/terraform.zip
+            sudo unzip -o /tmp/terraform.zip -d /usr/local/bin
+            terraform version
+
+executors:
+  python-executor:
     docker:
       - image: cimg/python:3.11
+    working_directory: ~/project
+
+jobs:
+  validate:
+    executor: python-executor
     steps:
       - checkout
-      - aws-cli/setup
+      - install_sam
+      - install_terraform
+      - run:
+          name: Validate SAM template
+          command: |
+            cd sam
+            sam validate --template-file template.yaml --region "$AWS_REGION"
+            sam build
+      - run:
+          name: Terraform lint & validate
+          command: |
+            cd terraform/modules/rds
+            terraform init -backend=false
+            terraform fmt -check
+            terraform validate
+
+  deploy_sam:
+    executor: python-executor
+    steps:
+      - checkout
+      - install_sam
+      - aws-cli/setup:
+          aws-access-key-id: AWS_ACCESS_KEY_ID
+          aws-secret-access-key: AWS_SECRET_ACCESS_KEY
+          aws-region: AWS_REGION
       - run:
           name: Deploy SAM
           command: |
-            pip install aws-sam-cli
             # Delete existing failed stack if it exists
             aws cloudformation delete-stack --stack-name serverless-rds-automation --region us-east-1 || true
             aws cloudformation wait stack-delete-complete --stack-name serverless-rds-automation --region us-east-1 || true
             cd sam
             sam build
-            if [ -n "$GITHUB_TOKEN" ]; then
-              sam deploy \
-                --stack-name serverless-rds-automation \
-                --region us-east-1 \
-               --resolve-s3 \
-                --no-confirm-changeset \
-                --capabilities CAPABILITY_IAM \
-                --parameter-overrides GitHubToken=$GITHUB_TOKEN
-            else
-              sam deploy \
-                --stack-name serverless-rds-automation \
-                --region us-east-1 \
-               --resolve-s3 \
-                --no-confirm-changeset \
-                --capabilities CAPABILITY_IAM
-            fi
-
-
-  deploy-terraform:
-    docker:
-      - image: cimg/base:stable
+            sam deploy \
+              --stack-name serverless-rds-automation \
+              --region "$AWS_REGION" \
+              --resolve-s3 \
+              --no-confirm-changeset \
+              --no-fail-on-empty-changeset \
+              --capabilities CAPABILITY_IAM \
+              --parameter-overrides \
+                GitHubToken=$GITHUB_TOKEN \
+                GitHubRepo=$GITHUB_REPO \
+                StageName=$ENV
+            
+  terraform_apply:
+    executor: python-executor
     steps:
       - checkout
-      - aws-cli/setup
+      - install_terraform
+      - aws-cli/setup:
+          aws-access-key-id: AWS_ACCESS_KEY_ID
+          aws-secret-access-key: AWS_SECRET_ACCESS_KEY
+          aws-region: AWS_REGION
       - run:
-          name: Install Terraform
+          name: Terraform apply for merged PRs
           command: |
-            wget https://releases.hashicorp.com/terraform/1.6.0/terraform_1.6.0_linux_amd64.zip
-            unzip terraform_1.6.0_linux_amd64.zip
-            mv terraform /usr/local/bin/
-      - run:
-          name: Deploy Terraform
-          command: |
-            if [ -d "terraform-instances" ] && [ "$(ls -A terraform-instances/*.tf 2>/dev/null)" ]; then
-              cd terraform-instances
-              terraform init
-              terraform apply -auto-approve
-            fi
+            cd terraform
+            terraform init
+            terraform workspace select "$ENV" || terraform workspace new "$ENV"
+            terraform apply -auto-approve
 
-  cleanup-resources:
-    docker:
-      - image: cimg/python:3.11
+  cleanup_stack:
+    executor: python-executor
     steps:
       - checkout
-      - aws-cli/setup
+      - install_sam
+      - aws-cli/setup:
+          aws-access-key-id: AWS_ACCESS_KEY_ID
+          aws-secret-access-key: AWS_SECRET_ACCESS_KEY
+          aws-region: AWS_REGION
       - run:
-          name: Cleanup SAM Resources
+          name: Cleanup SAM stack (scheduled)
           command: |
-            pip install aws-sam-cli
-            if aws cloudformation describe-stacks --stack-name serverless-rds-automation >/dev/null 2>&1; then
-              sam delete --stack-name serverless-rds-automation --no-prompts
+            if aws cloudformation describe-stacks --stack-name serverless-rds-automation --region "$AWS_REGION" >/dev/null 2>&1; then
+              sam delete --stack-name serverless-rds-automation --no-prompts --region "$AWS_REGION"
             else
-              echo "Stack not found, skipping deletion."
+              echo "Stack not found, skipping"
             fi
 
 workflows:
-  deploy:
+  version: 2
+
+  validate-every-commit:
     jobs:
-      - deploy-sam:
+      - validate
+
+  deploy-on-main:
+    jobs:
+      - deploy_sam:
           filters:
             branches:
               only: main
-      - deploy-terraform:
+      - terraform_apply:
           requires:
-            - deploy-sam
+            - deploy_sam
           filters:
             branches:
               only: main
 
-  cleanup-scheduled:
+  cleanup-nightly:
     triggers:
       - schedule:
-          cron: "0 0,2,4,6,8,10,12,14,16,18,20,22 * * *"  # Every 2 hours
+          cron: "0 3 * * *"
           filters:
             branches:
               only: main
     jobs:
-      - cleanup-resources
+      - cleanup_stack
