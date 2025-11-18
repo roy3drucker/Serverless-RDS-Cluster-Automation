@@ -39,7 +39,7 @@ jobs:
           name: Validate SAM template
           command: |
             cd sam
-            sam validate --template-file template.yaml --region "$AWS_REGION"
+            sam validate --template-file template.yaml --region "${AWS_DEFAULT_REGION:-us-east-1}"
             sam build
       - run:
           name: Terraform lint & validate
@@ -59,21 +59,21 @@ jobs:
           name: Deploy SAM
           command: |
             # Delete existing failed stack if it exists
-            aws cloudformation delete-stack --stack-name serverless-rds-automation --region us-east-1 || true
-            aws cloudformation wait stack-delete-complete --stack-name serverless-rds-automation --region us-east-1 || true
+            aws cloudformation delete-stack --stack-name serverless-rds-automation --region "${AWS_DEFAULT_REGION:-us-east-1}" || true
+            aws cloudformation wait stack-delete-complete --stack-name serverless-rds-automation --region "${AWS_DEFAULT_REGION:-us-east-1}" || true
             cd sam
             sam build
             sam deploy \
               --stack-name serverless-rds-automation \
-              --region "$AWS_REGION" \
+              --region "${AWS_DEFAULT_REGION:-us-east-1}" \
               --resolve-s3 \
               --no-confirm-changeset \
               --no-fail-on-empty-changeset \
               --capabilities CAPABILITY_IAM \
               --parameter-overrides \
-                GitHubToken=$GITHUB_TOKEN \
-                GitHubRepo=$GITHUB_REPO \
-                StageName=$ENV
+                GitHubToken="${GITHUB_TOKEN:-dummy}" \
+                GitHubRepo="${GITHUB_REPO:-owner/repo}" \
+                StageName="${ENV:-dev}"
             
   terraform_apply:
     executor: python-executor
@@ -86,7 +86,7 @@ jobs:
           command: |
             cd terraform
             terraform init
-            terraform workspace select "$ENV" || terraform workspace new "$ENV"
+            terraform workspace select "${ENV:-dev}" || terraform workspace new "${ENV:-dev}"
             terraform apply -auto-approve
 
   cleanup_stack:
@@ -98,8 +98,8 @@ jobs:
       - run:
           name: Cleanup SAM stack (scheduled)
           command: |
-            if aws cloudformation describe-stacks --stack-name serverless-rds-automation --region "$AWS_REGION" >/dev/null 2>&1; then
-              sam delete --stack-name serverless-rds-automation --no-prompts --region "$AWS_REGION"
+            if aws cloudformation describe-stacks --stack-name serverless-rds-automation --region "${AWS_DEFAULT_REGION:-us-east-1}" >/dev/null 2>&1; then
+              sam delete --stack-name serverless-rds-automation --no-prompts --region "${AWS_DEFAULT_REGION:-us-east-1}"
             else
               echo "Stack not found, skipping"
             fi
