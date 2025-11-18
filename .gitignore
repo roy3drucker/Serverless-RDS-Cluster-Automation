@@ -9,6 +9,7 @@ terraform.tfvars
 # SAM
 .aws-sam/
 samconfig.toml
+!sam/samconfig.toml
 
 # Python
 __pycache__/
