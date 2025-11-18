@@ -297,19 +297,7 @@ Resources:
         Route53:
           HostedZoneId: !Ref HostedZoneId
         BasePath:
-          - request-rds 
-          
-      Domain:
-        Fn::If:
-          - HasCustomDomain
-          -
-            DomainName: !Ref CustomDomainName
-            CertificateArn: !Ref CertificateArn
-            Route53:
-              HostedZoneId: !Ref HostedZoneId
-            BasePath:
-              - request-rds
-          - !Ref AWS::NoValue
+          - request-rds
 
   ApiKey:
     Type: AWS::ApiGateway::ApiKey
