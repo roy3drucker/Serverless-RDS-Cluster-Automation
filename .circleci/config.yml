@@ -61,8 +61,19 @@ jobs:
           command: |
             # Delete existing failed stack if it exists
             aws cloudformation delete-stack --stack-name serverless-rds-automation --region "${AWS_DEFAULT_REGION:-us-east-1}" || true
-            # Wait briefly for deletion to start
-            sleep 30
+            
+            # Wait for stack deletion to complete (with timeout)
+            echo "Waiting for stack deletion to complete..."
+            for i in {1..30}; do
+              STATUS=$(aws cloudformation describe-stacks --stack-name serverless-rds-automation --region "${AWS_DEFAULT_REGION:-us-east-1}" --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo "DELETED")
+              if [ "$STATUS" = "DELETED" ] || [ "$STATUS" = "DELETE_COMPLETE" ]; then
+                echo "Stack deleted successfully"
+                break
+              fi
+              echo "Stack status: $STATUS, waiting..."
+              sleep 20
+            done
+            
             cd sam
             sam build
             sam deploy \
