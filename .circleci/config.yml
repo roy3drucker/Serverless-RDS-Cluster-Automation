@@ -18,9 +18,12 @@ jobs:
           name: Build SAM
           command: sam build --use-container
       - run:
+          name: List Build Artifacts
+          command: ls -R .aws-sam || true
+      - run:
           name: Deploy SAM
           command: |
-            sam deploy --no-confirm-changeset --force-upload --stack-name rds-provisioning-stack \
+            sam deploy --template-file .aws-sam/build/template.yaml --no-confirm-changeset --force-upload --stack-name rds-provisioning-stack \
               --capabilities CAPABILITY_IAM --resolve-s3 --parameter-overrides GitHubRepo=$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME
 
   terraform-plan:
