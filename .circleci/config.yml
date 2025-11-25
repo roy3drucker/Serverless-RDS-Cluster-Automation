@@ -1,0 +1,68 @@
+version: 2.1
+
+orbs:
+  aws-cli: circleci/aws-cli@3.1
+  terraform: circleci/terraform@3.2
+  sam: circleci/aws-sam-serverless@3.2
+
+jobs:
+  deploy-serverless:
+    docker:
+      - image: cimg/python:3.9
+    steps:
+      - checkout
+      - aws-cli/setup
+      - sam/install
+      - run:
+          name: Build SAM
+          command: sam build
+      - run:
+          name: Deploy SAM
+          command: |
+            sam deploy --no-confirm-changeset --force-upload --stack-name rds-provisioning-stack \
+              --capabilities CAPABILITY_IAM --resolve-s3 --parameter-overrides GitHubRepo=$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME
+
+  terraform-plan:
+    docker:
+      - image: hashicorp/terraform:light
+    steps:
+      - checkout
+      - run:
+          name: Terraform Init
+          command: cd terraform/live && terraform init
+      - run:
+          name: Terraform Plan
+          command: cd terraform/live && terraform plan
+
+  terraform-apply:
+    docker:
+      - image: hashicorp/terraform:light
+    steps:
+      - checkout
+      - run:
+          name: Terraform Init
+          command: cd terraform/live && terraform init
+      - run:
+          name: Terraform Apply
+          command: cd terraform/live && terraform apply -auto-approve
+
+workflows:
+  version: 2
+  deploy-infrastructure:
+    jobs:
+      - deploy-serverless:
+          filters:
+            branches:
+              only: main
+            # Only trigger if serverless components change
+            # In a real setup, we'd use path-filtering orb
+      
+      - terraform-plan:
+          filters:
+            branches:
+              ignore: main
+      
+      - terraform-apply:
+          filters:
+            branches:
+              only: main

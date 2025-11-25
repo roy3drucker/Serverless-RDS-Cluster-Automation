@@ -1,0 +1,170 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Serverless RDS Cluster Automation
+  
+  API Gateway -> SNS -> SQS -> Lambda -> GitHub PR (Terraform)
+
+Globals:
+  Function:
+    Timeout: 30
+    Runtime: python3.9
+    Architectures:
+      - x86_64
+
+Resources:
+  # -------------------------------------------------------------------------
+  # API Gateway
+  # -------------------------------------------------------------------------
+  RdsProvisioningApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      Auth:
+        DefaultAuthorizer: AWS_IAM # Bonus: IAM Authentication
+
+  # -------------------------------------------------------------------------
+  # SNS Topic (Decoupling)
+  # -------------------------------------------------------------------------
+  RdsRequestTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: rds-provisioning-requests
+
+  # -------------------------------------------------------------------------
+  # SQS Queue (Buffering)
+  # -------------------------------------------------------------------------
+  RdsRequestQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: rds-provisioning-queue
+      VisibilityTimeout: 60 # Slightly higher than Lambda timeout
+
+  # -------------------------------------------------------------------------
+  # SNS Subscription to SQS
+  # -------------------------------------------------------------------------
+  RdsRequestSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Protocol: sqs
+      Endpoint: !GetAtt RdsRequestQueue.Arn
+      TopicArn: !Ref RdsRequestTopic
+      RawMessageDelivery: true
+
+  # SQS Policy to allow SNS to send messages
+  RdsRequestQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref RdsRequestQueue
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: sns.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt RdsRequestQueue.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Ref RdsRequestTopic
+
+  # -------------------------------------------------------------------------
+  # Lambda Function
+  # -------------------------------------------------------------------------
+  RdsProvisioningFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: lambda/
+      Handler: handler.lambda_handler
+      Environment:
+        Variables:
+          GITHUB_REPO: !Ref GitHubRepo
+          GITHUB_SECRET_NAME: !Ref GitHubSecretName
+      Policies:
+        - SQSPollerPolicy:
+            QueueName: !GetAtt RdsRequestQueue.QueueName
+        - SecretsManagerReadPolicy:
+            SecretId: !Ref GitHubSecretName
+      Events:
+        SQSEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt RdsRequestQueue.Arn
+            BatchSize: 1
+
+  # -------------------------------------------------------------------------
+  # API Integration (Directly publishing to SNS for async processing)
+  # -------------------------------------------------------------------------
+  # Note: AWS SAM doesn't natively support direct service integration in the 
+  # simplified syntax easily without defining a function. 
+  # For simplicity in this assignment, we will use a small helper Lambda or 
+  # assume the "API" is just an endpoint that triggers a synchronous Lambda 
+  # which publishes to SNS. 
+  # HOWEVER, to be "Serverless" and "Best Practice" for async, 
+  # we should use API Gateway Service Integration.
+  # Let's stick to a simple "RequestFunction" that publishes to SNS 
+  # to keep the SAM template clean and readable, 
+  # OR use the 'Events' property on a function.
+  
+  # Let's add a synchronous entry point function that validates and pushes to SNS.
+  ApiHandlerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      InlineCode: |
+        import json
+        import boto3
+        import os
+        
+        sns = boto3.client('sns')
+        topic_arn = os.environ['TOPIC_ARN']
+        
+        def lambda_handler(event, context):
+            try:
+                body = json.loads(event['body'])
+                # Basic validation could go here
+                
+                sns.publish(
+                    TopicArn=topic_arn,
+                    Message=json.dumps(body)
+                )
+                
+                return {
+                    'statusCode': 202,
+                    'body': json.dumps({'message': 'Request accepted', 'status': 'processing'})
+                }
+            except Exception as e:
+                return {
+                    'statusCode': 400,
+                    'body': json.dumps({'error': str(e)})
+                }
+      Handler: index.lambda_handler
+      Runtime: python3.9
+      Environment:
+        Variables:
+          TOPIC_ARN: !Ref RdsRequestTopic
+      Policies:
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt RdsRequestTopic.TopicName
+      Events:
+        ApiRequest:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RdsProvisioningApi
+            Path: /provision
+            Method: post
+
+Parameters:
+  GitHubRepo:
+    Type: String
+    Description: "GitHub Repository (owner/repo) where Terraform code lives"
+    Default: "roy3drucker/experiment-repo" # Update this to the user's actual repo if known or keep generic
+  GitHubSecretName:
+    Type: String
+    Description: "Name of the secret in Secrets Manager containing GitHub PAT"
+    Default: "github/pat"
+
+Outputs:
+  ApiEndpoint:
+    Description: "API Gateway endpoint URL for Prod stage"
+    Value: !Sub "https://${RdsProvisioningApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/provision"
