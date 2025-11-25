@@ -13,10 +13,9 @@ jobs:
       - checkout
       - aws-cli/setup
       - sam/install
-      - setup_remote_docker
       - run:
           name: Build SAM
-          command: sam build --use-container
+          command: sam build
       - run:
           name: List Build Artifacts
           command: ls -R .aws-sam || true
