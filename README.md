@@ -25,7 +25,7 @@ This project provides an automated solution for provisioning RDS clusters on AWS
 1. Fork/Clone this repository.
 2. Store your GitHub PAT in AWS Secrets Manager:
    ```bash
-   aws secretsmanager create-secret --name github/pat --secret-string "YOUR_GITHUB_TOKEN"
+   aws secretsmanager create-secret --name github/pat --secret-string "YOUR_GITHUB_TOKEN".
    ```
 3. Push the code to GitHub.
 4. Set up the project in CircleCI.
