@@ -13,9 +13,11 @@ jobs:
       - checkout
       - aws-cli/setup
       - sam/install
+      - setup_remote_docker:
+          version: 20.10.14
       - run:
           name: Build SAM
-          command: sam build
+          command: sam build --use-container
       - run:
           name: Deploy SAM
           command: |
