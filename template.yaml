@@ -8,7 +8,7 @@ Description: >
 Globals:
   Function:
     Timeout: 30
-    Runtime: python3.9
+    Runtime: python3.11
     Architectures:
       - x86_64
 
@@ -139,7 +139,7 @@ Resources:
                     'body': json.dumps({'error': str(e)})
                 }
       Handler: index.lambda_handler
-      Runtime: python3.9
+      Runtime: python3.11
       Environment:
         Variables:
           TOPIC_ARN: !Ref RdsRequestTopic
