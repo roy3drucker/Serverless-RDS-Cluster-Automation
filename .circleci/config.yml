@@ -13,10 +13,10 @@ jobs:
       - checkout
       - aws-cli/setup
       - sam/install
-      - setup_remote_docker
+
       - run:
           name: Build SAM
-          command: sam build --use-container
+          command: sam build
       - run:
           name: List Build Artifacts
           command: ls -R .aws-sam || true
@@ -24,7 +24,7 @@ jobs:
           name: Deploy SAM
           command: |
             sam deploy --template-file .aws-sam/build/template.yaml --no-confirm-changeset --force-upload --stack-name rds-provisioning-stack \
-              --capabilities CAPABILITY_IAM --resolve-s3 --parameter-overrides GitHubRepo=$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME
+              --capabilities CAPABILITY_IAM --resolve-s3 --no-fail-on-empty-changeset --parameter-overrides GitHubRepo=$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME
 
   terraform-plan:
     docker:

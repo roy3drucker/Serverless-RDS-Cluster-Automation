@@ -160,7 +160,7 @@ Parameters:
   GitHubRepo:
     Type: String
     Description: "GitHub Repository (owner/repo) where Terraform code lives"
-    Default: "roy3drucker/experiment-repo" # Update this to the user's actual repo if known or keep generic
+    Default: "roy3drucker/Serverless-RDS-Cluster-Automation" 
   GitHubSecretName:
     Type: String
     Description: "Name of the secret in Secrets Manager containing GitHub PAT"
