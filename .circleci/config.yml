@@ -12,7 +12,12 @@ jobs:
     steps:
       - checkout
       - aws-cli/setup
-      - sam/install
+      - run:
+          name: Install SAM CLI
+          command: pip install aws-sam-cli
+      - run:
+          name: Check Python Version
+          command: python --version && which python
 
       - run:
           name: Build SAM
