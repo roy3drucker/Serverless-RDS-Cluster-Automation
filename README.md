@@ -4,6 +4,8 @@ This project provides an automated solution for provisioning RDS clusters on AWS
 
 ## Architecture
 
+![Architecture Structure](Screenshot_91.png)
+
 1. **API Gateway**: Entry point for provisioning requests.
 2. **SNS & SQS**: Decouples the request from processing, ensuring reliability.
 3. **Lambda**: Consumes messages, generates Terraform code, and creates a GitHub Pull Request.

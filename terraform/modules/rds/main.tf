@@ -13,7 +13,7 @@ resource "aws_db_instance" "default" {
   engine_version       = var.engine == "mysql" ? "8.0" : "13.7"
   instance_class       = local.instance_class
   username             = "admin"
-  password             = "AvoidHardcodingPasswords123!" # In real world, use Secrets Manager
+  password             = data.aws_secretsmanager_secret_version.db_password.secret_string
   parameter_group_name = "default.${var.engine}${var.engine == "mysql" ? "8.0" : "13"}"
   skip_final_snapshot  = true
   publicly_accessible  = false
@@ -24,6 +24,9 @@ resource "aws_db_instance" "default" {
   }
 }
 
+data "aws_secretsmanager_secret_version" "db_password" {
+  secret_id = "rds-db-password"
+}
+
 # Note: For a real production setup, we would use aws_secretsmanager_secret for the password
 # and likely an RDS Cluster (Aurora) for high availability in Prod.
-# Keeping it simple for this assignment as per "Junior" level but following structure.

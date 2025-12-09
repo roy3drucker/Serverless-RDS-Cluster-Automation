@@ -95,21 +95,8 @@ Resources:
             Queue: !GetAtt RdsRequestQueue.Arn
             BatchSize: 1
 
-  # -------------------------------------------------------------------------
-  # API Integration (Directly publishing to SNS for async processing)
-  # -------------------------------------------------------------------------
-  # Note: AWS SAM doesn't natively support direct service integration in the 
-  # simplified syntax easily without defining a function. 
-  # For simplicity in this assignment, we will use a small helper Lambda or 
-  # assume the "API" is just an endpoint that triggers a synchronous Lambda 
-  # which publishes to SNS. 
-  # HOWEVER, to be "Serverless" and "Best Practice" for async, 
-  # we should use API Gateway Service Integration.
-  # Let's stick to a simple "RequestFunction" that publishes to SNS 
-  # to keep the SAM template clean and readable, 
-  # OR use the 'Events' property on a function.
   
-  # Let's add a synchronous entry point function that validates and pushes to SNS.
+  
   ApiHandlerFunction:
     Type: AWS::Serverless::Function
     Properties:
