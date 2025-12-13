@@ -38,7 +38,7 @@ jobs:
       - checkout
       - run:
           name: Terraform Init
-          command: cd terraform/live && terraform init
+          command: cd terraform/live && terraform init -backend-config="key=terraform-${CIRCLE_BRANCH}.tfstate"
       - run:
           name: Terraform Plan
           command: cd terraform/live && terraform plan
@@ -50,7 +50,7 @@ jobs:
       - checkout
       - run:
           name: Terraform Init
-          command: cd terraform/live && terraform init
+          command: cd terraform/live && terraform init -backend-config="key=terraform-${CIRCLE_BRANCH}.tfstate"
       - run:
           name: Terraform Apply
           command: cd terraform/live && terraform apply -auto-approve

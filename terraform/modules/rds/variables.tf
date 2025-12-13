@@ -1,8 +1,3 @@
-# Variables are defined in main.tf for this simple module, 
-# but usually we split them. Since I put them in main.tf above, 
-# I will create a dummy outputs.tf or just skip this if not strictly needed.
-# Let's actually move variables to variables.tf to be cleaner.
-
 variable "db_name" {
   description = "Name of the database"
   type        = string
@@ -15,5 +10,15 @@ variable "engine" {
 
 variable "environment" {
   description = "Environment (dev, prod)"
+  type        = string
+}
+
+variable "vpc_security_group_ids" {
+  description = "List of VPC Security Group IDs"
+  type        = list(string)
+}
+
+variable "db_subnet_group_name" {
+  description = "Name of the DB Subnet Group"
   type        = string
 }
